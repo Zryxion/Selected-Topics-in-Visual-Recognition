@@ -1,14 +1,33 @@
+
+from collections import Counter
+import pickle
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 from torchvision.transforms import v2
-from PIL import Image
-import os
-import pandas as pd
-from collections import Counter
+import torchvision.datasets as datasets
+import tqdm
+import numpy as np
 
 
-def main():
-    test_transform = v2.Compose([
+def main(load_checkpoint=False, model_name='resnext50_32x4d', fc_type=0,
+         unfreeze_num=4, num_epochs=100, train_batch=100, compile=False,
+         checkpoint_dir='', save_dir=''):
+
+    # Load Training and Validation data
+    train_transform = v2.Compose([
+        v2.ToImage(),
+        v2.Resize(256),
+        v2.RandomResizedCrop(224, scale=(0.6, 1.0)),
+        v2.RandomHorizontalFlip(),
+        v2.RandomRotation(20),
+        v2.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
+        v2.RandomErasing(p=0.3),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    val_transform = v2.Compose([
         v2.ToImage(),
         v2.Resize(256),
         v2.CenterCrop(224),
@@ -16,166 +35,184 @@ def main():
         v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    internal_idx = {'0': 0, '1': 1, '10': 2, '11': 3, '12': 4, '13': 5,
-                    '14': 6, '15': 7, '16': 8, '17': 9, '18': 10, '19': 11,
-                    '2': 12, '20': 13, '21': 14, '22': 15, '23': 16, '24': 17,
-                    '25': 18, '26': 19, '27': 20, '28': 21, '29': 22, '3': 23,
-                    '30': 24, '31': 25, '32': 26, '33': 27, '34': 28, '35': 29,
-                    '38': 32, '39': 33, '4': 34, '40': 35, '41': 36, '42': 37,
-                    '43': 38, '44': 39, '45': 40, '46': 41, '47': 42, '48': 43,
-                    '49': 44, '5': 45, '50': 46, '51': 47, '52': 48, '53': 49,
-                    '54': 50, '55': 51, '56': 52, '57': 53, '58': 54, '59': 55,
-                    '6': 56, '60': 57, '61': 58, '62': 59, '63': 60, '64': 61,
-                    '65': 62, '66': 63, '67': 64, '68': 65, '69': 66, '7': 67,
-                    '70': 68, '71': 69, '72': 70, '73': 71, '74': 72, '75': 73,
-                    '76': 74, '77': 75, '78': 76, '79': 77, '8': 78, '80': 79,
-                    '81': 80, '82': 81, '83': 82, '84': 83, '85': 84, '86': 85,
-                    '87': 86, '88': 87, '89': 88, '9': 89, '90': 90, '91': 91,
-                    '92': 92, '93': 93, '94': 94, '95': 95, '96': 96, '97': 97,
-                    '98': 98, '99': 99, '36': 30, '37': 31}
+    train_dir = '/mnt/HDD3/home/owen/data/train'
+    val_dir = '/mnt/HDD3/home/owen/data/val'
+    train_dataset = datasets.ImageFolder(
+        root=train_dir,
+        transform=train_transform
+    )
+    val_dataset = datasets.ImageFolder(
+        root=val_dir,
+        transform=val_transform
+    )
 
-    models = []
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print("Class to index mapping (folder -> class index):")
+    print(train_dataset.class_to_idx)
 
-    # Resnext50 with more fc
-    paths = [
-        "/mnt/HDD3/home/owen/model/resnext101dropout/bestfreeze_0.9100.pth",
-        "/mnt/HDD3/home/owen/model/resnext101dropout/bestfreeze_0.9067.pth",
-        "/mnt/HDD3/home/owen/model/resnext101dropout/bestfreeze_0.9033.pth",
-        # "/mnt/HDD3/home/owen/model/resnext101dropout/bestfreeze_0.9000.pth",
-        # "/mnt/HDD3/home/owen/model/resnext101dropout/bestfreeze_200.pth",
-        # "/mnt/HDD3/home/owen/model/resnext101dropout/bestfreeze_100.pth"
-    ]
-    for path in paths:
-        model1 = torch.hub.load(
-            'pytorch/vision:v0.10.0',
-            'resnext50_32x4d',
-            weights='ResNeXt50_32X4D_Weights.IMAGENET1K_V2'
-        )
+    print("\nSample file paths and labels:")
+    for i in range(10):  # Check first 10 samples
+        path, label = train_dataset.samples[i]
+        print(f"Path: {path}, Label: {label}")
 
-        model1.fc = nn.Sequential(
-            nn.BatchNorm1d(2048),
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=train_batch,
+        shuffle=True,
+        num_workers=12
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=20,
+        shuffle=False,
+        num_workers=4
+    )
+
+    # Calculate the weight of each class
+    class_counts = Counter(train_dataset.targets)
+    weight = np.zeros(100)
+    for cls_idx, count in class_counts.items():
+        weight[cls_idx] = 1 / count
+
+    # Build the model
+    model_weight = {
+        'resnext50_32x4d': 'ResNeXt50_32X4D_Weights.IMAGENET1K_V2',
+        'resnext101_32x8d': 'ResNeXt101_32X8D_Weights.IMAGENET1K_V2'
+    }
+    model = torch.hub.load('pytorch/vision:v0.10.0', model_name,
+                           weights=model_weight[model_name])
+
+    if fc_type == 1:
+        model.fc = nn.Sequential(
             nn.Dropout(0.5),
+            nn.Linear(2048, 100)
+        )
+    elif fc_type == 2:
+        model.fc = nn.Sequential(
             nn.Linear(2048, 512),
             nn.ReLU(),
             nn.BatchNorm1d(512),
             nn.Dropout(0.3),
             nn.Linear(512, 100)
         )
+    else:
+        model.fc = nn.Linear(2048, 100)
 
-        model1.to(device)
-        if torch.__version__ >= "2.0":
-            model1 = torch.compile(model1)
+    found_name = False
+    for name, params in model.named_parameters():
+        if name == f"layer{unfreeze_num}.0.conv1.weight":
+            found_name = True
+        params.requires_grad = found_name
 
-        model1.load_state_dict(torch.load(path, map_location=device))
-        models.append(model1)
+    if compile and torch.__version__ >= "2.0":
+        model = torch.compile(model)
 
-    # Resnext101 with dropout
-    paths = [
-        "/mnt/HDD3/home/owen/model/resnext101dropout/bestfreeze_0.9133.pth",
-        "/mnt/HDD3/home/owen/model/bestfreeze_0.9067.pth",
-        "/mnt/HDD3/home/owen/model/bestfreeze_0.9100.pth",
-    ]
-    for path in paths:
-        model2 = torch.hub.load(
-            'pytorch/vision:v0.10.0',
-            'resnext101_32x8d',
-            weights='ResNeXt101_32X8D_Weights.IMAGENET1K_V2'
-        )
+    if load_checkpoint:
+        model.load_state_dict(torch.load(checkpoint_dir))
 
-        model2.fc = nn.Sequential(
-            nn.Dropout(0.5),
-            nn.Linear(2048, 100)
-        )
-        model2.to(device)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model.to(device)
 
-        model2.load_state_dict(torch.load(path, map_location=device))
-        models.append(model2)
+    class_weights = torch.tensor(weight, dtype=torch.float32).to(device)
 
-    # Resnext50 with dropout
-    paths = [
-        "/mnt/HDD3/home/owen/model/resnext50dropout/bestfreeze_0.9133.pth",
-        "/mnt/HDD3/home/owen/model/resnext50dropout/bestfreeze_0.9067.pth",
-        "/mnt/HDD3/home/owen/model/resnext50dropout/bestfreeze_200.pth",
-        "/mnt/HDD3/home/owen/model/resnext50dropout/bestfreeze_300.pth"
-    ]
-    for path in paths:
-        model3 = torch.hub.load(
-            'pytorch/vision:v0.10.0',
-            'resnext50_32x4d',
-            weights='ResNeXt50_32X4D_Weights.IMAGENET1K_V2'
-        )
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=0.00001,
+        weight_decay=1e-4
+    )
 
-        model3.fc = nn.Sequential(
-            nn.Dropout(0.5),
-            nn.Linear(2048, 100)
-        )
-        model3.to(device)
+    class_weights = torch.tensor(np.float64(weight)).float().to(device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.1)
 
-        model3.load_state_dict(torch.load(path, map_location=device))
-        models.append(model3)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=num_epochs
+    )
 
-    # Resnext50
-    paths = [
-        "/mnt/HDD3/home/owen/model/resnext50dropout/bestfreeze_0.9100.pth",
-        "/mnt/HDD3/home/owen/model/resnext50dropout/bestfreeze_0.9033.pth",
-        # "/mnt/HDD3/home/owen/model/resnext50dropout/bestfreeze_0.9000.pth",
-        # "/mnt/HDD3/home/owen/model/resnext50dropout/bestfreeze_0.8967.pth",
-        # "/mnt/HDD3/home/owen/model/resnext50dropout/bestfreeze_0.8933.pth",
-    ]
-    for path in paths:
-        model4 = torch.hub.load(
-            'pytorch/vision:v0.10.0',
-            'resnext50_32x4d',
-            weights='ResNeXt50_32X4D_Weights.IMAGENET1K_V2'
-        )
+    # Training loop
+    maxAcc = -999
+    AccHistory = {'train_acc': [], 'val_acc': [],
+                  'train_loss': [], 'val_loss': []}
+    for epoch in range(0, num_epochs):
+        model.train()
+        total_loss = 0
+        total_correct = 0
+        for i, (images, labels) in tqdm(enumerate(train_loader),
+                                        total=len(train_loader)):
+            images, labels = images.to(device), labels.to(device)
 
-        model4.fc = nn.Linear(2048, 100)
-        if torch.__version__ >= "2.0":
-            model4 = torch.compile(model4)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
 
-        model4.to(device)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        model4.load_state_dict(torch.load(path, map_location=device))
-        models.append(model4)
+            total_loss += loss.item()
+            total_correct += (outputs.argmax(dim=1) == labels).sum().item()
+        scheduler.step()
 
-    label = []
-    allFilename = []
-    test_root = '/mnt/HDD3/home/owen/data/test'
+        accuracy = total_correct / len(train_dataset)
+        train_loss = total_loss / len(train_loader)
 
-    for dirname, _, filenames in os.walk(test_root):
-        for filename in sorted(filenames):
-            filepath = os.path.join(dirname, filename)
+        epoch_p = f"[Epoch {epoch+1}]"
+        t_p = f"Train Loss: {train_loss:.4f}, Train Accuracy: {accuracy:.4f}"
+        print(epoch_p + t_p)
 
-            try:
-                pic = Image.open(filepath).convert("RGB")
-            except Exception as e:
-                print(f"Error loading image {filename}: {e}")
-                continue
+        # Validation loop
+        model.eval()
+        val_correct = 0
+        total_loss = 0
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to(device), labels.to(device)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                total_loss += loss.item()
+                val_correct += (outputs.argmax(dim=1) == labels).sum().item()
 
-            image = test_transform(pic).unsqueeze(0).to(device)
+        val_accuracy = val_correct / len(val_dataset)
+        val_loss = total_loss / len(val_loader)
+        val_p1 = f"Validation Loss: {val_loss:.4f},"
+        val_p2 = f" Validation Accuracy: {val_accuracy:.4f}"
+        print(val_p1 + val_p2)
 
-            preds = []
-            for model in models:
-                model.eval()
-                with torch.no_grad():
-                    outputs = model(image)
-                    pred = outputs.argmax(dim=1).item()
-                preds.append(pred)
+        AccHistory['train_acc'].append(accuracy)
+        AccHistory['val_acc'].append(val_accuracy)
+        AccHistory['train_loss'].append(train_loss)
+        AccHistory['val_loss'].append(val_loss)
 
-            final_pred = Counter(preds).most_common(1)[0][0]
+        if epoch % 100 == 0:
+            torch.save(model.state_dict(),
+                       f"{save_dir}/bestfreeze_{epoch}.pth")
+            with open(f'{model_name} - {epoch}.pickle', 'wb') as handle:
+                pickle.dump(AccHistory,
+                            handle,
+                            protocol=pickle.HIGHEST_PROTOCOL)
 
-            label.append(
-                [x for x, y in internal_idx.items() if y == final_pred][0]
-            )
-            allFilename.append(filename[:-4])
+        if val_accuracy > maxAcc:
+            maxAcc = val_accuracy
+            torch.save(model.state_dict(),
+                       f"{save_dir}/bestfreeze_{maxAcc:.4f}.pth")
 
-    df = pd.DataFrame({
-        'image_name': allFilename,
-        'pred_label': label
-    })
-    df.to_csv("prediction.csv", index=False)
+        torch.save(model.state_dict(), "test.pth")
+
+    with open(f'{model_name}-{fc_type}-{num_epochs}.pickle', 'wb') as handle:
+        pickle.dump(AccHistory, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 if __name__ == "__main__":
-    main()
+    check_dir = "./model/resnext50dropout/bestfreeze_0.8733.pth"
+    save_dir = "./model/resnext50dropout"
+    main(
+        load_checkpoint=False,
+        model_name="resnext50_32x4d",
+        fc_type=2,
+        unfreeze_num=2,
+        num_epochs=30,
+        train_batch=100,
+        compile=False,
+        checkpoint_dir=check_dir,
+        save_dir=save_dir
+    )
+
+    # load()
