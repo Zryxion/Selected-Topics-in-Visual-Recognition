@@ -37,13 +37,13 @@ You can now start Training and Testing by:
 python train.py
 python test.py
 ```
-***_Remember to change the directory variable inside the files to your local directory_***
+***_Remember to change all the directory inside to your local directory_***
 
 ### 5. Plot Learning Curve (Optional)
 You can plot the learning curve by running:
 ``` 
 python test.py
 ``` 
-***_Only run when you have the pickle files_***
+***_Only run when you have the pickle files and set the range to the correct epoch_***
 ## Performance Snapshot 🚀
 ![](https://github.com/Zryxion/Selected-Topics-in-Visual-Recognition/blob/main/HW1/leaderboard.png)
