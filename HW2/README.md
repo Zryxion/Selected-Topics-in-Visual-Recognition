@@ -1,4 +1,4 @@
-# NYCU Computer Vision 2025 Spring HW2
+# NYCU STinVRuDL 2025 Spring HW2
 Student ID: 313561001   
 Name: 林家輝
 
