@@ -1,5 +1,4 @@
 import os
-import numpy as np
 from PIL import Image
 from tqdm import tqdm
 import torch
@@ -8,7 +7,6 @@ import torch.distributed as dist
 from torch.utils.data import Dataset, DataLoader, DistributedSampler
 from torchvision.models.detection import fasterrcnn_resnet50_fpn_v2
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
-from torchvision.models.detection.anchor_utils import AnchorGenerator
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
@@ -59,9 +57,6 @@ class COCODetection(Dataset):
             'image_id': torch.tensor([img_id])
         }
 
-
-        assert img.shape[0] == 3, f"Image has {img.shape[0]} channels instead of 3"
-
         return img, target
 
     def __len__(self):
@@ -70,6 +65,7 @@ class COCODetection(Dataset):
 
 def collate_fn(batch):
     return tuple(zip(*batch))
+
 
 class DropoutFastRCNNPredictor(nn.Module):
     def __init__(self, in_channels, num_classes, dropout_p=0.3):
@@ -86,22 +82,33 @@ class DropoutFastRCNNPredictor(nn.Module):
         bbox_deltas = self.bbox_pred(x)
         return scores, bbox_deltas
 
-def get_model(num_classes, mode = 0):
+
+def get_model(num_classes, mode=0):
     # anchor_generator = AnchorGenerator(
     #     sizes=((16,), (32,), (64,), (128,), (256,), (512,)),
     #     aspect_ratios=((0.25, 0.5, 1.0, 2.0),) * 5
     # )
 
-    # model = fasterrcnn_resnet50_fpn_v2(weights='FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1', anchor =  anchor_generator)
+    # model = fasterrcnn_resnet50_fpn_v2(
+    # weights='FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1',
+    # anchor=anchor_generator)
 
-    model = fasterrcnn_resnet50_fpn_v2(weights='FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1')
-    
+    model = fasterrcnn_resnet50_fpn_v2(
+        weights='FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1'
+        )
+
     # model.rpn.anchor_generator = anchor_generator
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     if mode == 0:
-        model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+        model.roi_heads.box_predictor = FastRCNNPredictor(
+            in_features,
+            num_classes
+            )
     elif mode == 1:
-        model.roi_heads.box_predictor = DropoutFastRCNNPredictor(in_features, num_classes)
+        model.roi_heads.box_predictor = DropoutFastRCNNPredictor(
+            in_features,
+            num_classes
+            )
 
     for param in model.parameters():
         param.requires_grad = False
@@ -111,7 +118,7 @@ def get_model(num_classes, mode = 0):
             param.requires_grad = True
         else:
             param.requires_grad = False
-    
+
     for name, param in model.backbone.body.named_parameters():
         if name.startswith("layer4"):
             param.requires_grad = True
@@ -141,14 +148,15 @@ def cleanup_ddp():
 def is_main_process():
     return int(os.environ["RANK"]) == 0
 
+
 @torch.no_grad()
-def evaluate_coco(model, data_loader, coco_gt, device, history = None):
+def evaluate_coco(model, data_loader, coco_gt, device, history=None):
     model.eval()
     local_results = []
     total_labels = torch.tensor(0, dtype=torch.int32, device=device)
     correct_labels = torch.tensor(0, dtype=torch.int32, device=device)
-
-    for images, targets in tqdm(data_loader, desc="Evaluating", disable=not is_main_process()):
+    pb = tqdm(data_loader, desc="Evaluating", disable=not is_main_process())
+    for images, targets in pb:
         images = [img.to(device) for img in images]
         outputs = model(images)
 
@@ -163,7 +171,13 @@ def evaluate_coco(model, data_loader, coco_gt, device, history = None):
             total_labels += len(gt_labels)
 
             matched = min(len(gt_labels), len(labels))
-            correct_labels += (labels[:matched][torch.argsort(boxes[:matched].T, dim=1)[0]] == gt_labels[:matched][torch.argsort(gt_boxes[:matched].T, dim=1)[0]]).sum().item()
+
+            filter_pred = torch.argsort(boxes[:matched].T, dim=1)[0]
+            pred_label = labels[:matched][filter_pred]
+            filter_gt = torch.argsort(gt_boxes[:matched].T, dim=1)[0]
+            gt_label = gt_labels[:matched][filter_gt]
+
+            correct_labels += (pred_label == gt_label).sum().item()
 
             for box, score, label in zip(boxes, scores, labels):
                 x1, y1, x2, y2 = box.tolist()
@@ -183,7 +197,7 @@ def evaluate_coco(model, data_loader, coco_gt, device, history = None):
 
     # Flatten list of lists
     if is_main_process():
-        all_results = [item for sublist in gathered_results for item in sublist]
+        all_results = [x for sublist in gathered_results for x in sublist]
         with open('val_res.json', "w") as f:
             json.dump(all_results, f, indent=2)
         coco_dt = coco_gt.loadRes(all_results)
@@ -192,21 +206,21 @@ def evaluate_coco(model, data_loader, coco_gt, device, history = None):
         coco_eval.accumulate()
         coco_eval.summarize()
 
-        
         if total_labels > 0:
             label_acc = correct_labels / total_labels
-            print(f"✅ Label Accuracy: {label_acc:.4f} ({correct_labels}/{total_labels})")
-        
-        
-        if history != None:
-            map_50_95 = coco_eval.stats[0]
-            history.append({'evalMAP' : map_50_95, 'label_acc' : label_acc.cpu()})
+            label_frac = f"{correct_labels}/{total_labels}"
+            print(f"Label Accuracy: {label_acc: .4f} ({label_frac})")
 
-def train(load_checkpoint = False, model_path="fasterrcnn_ddp_4.pth", mode = 0):
+        if history is not None:
+            map = coco_eval.stats[0]
+            history.append({'evalMAP': map, 'label_acc': label_acc.cpu()})
+
+
+def train(load_checkpoint=0, model_path="fasterrcnn_ddp_4.pth", mode=0):
     setup_ddp()
 
     local_rank = int(os.environ["LOCAL_RANK"])
-    device = torch.device(f"cuda:{local_rank}")
+    device = torch.device(f"cuda: {local_rank}")
 
     # Hyperparameters
     num_classes = 11
@@ -218,20 +232,15 @@ def train(load_checkpoint = False, model_path="fasterrcnn_ddp_4.pth", mode = 0):
         v2.ToImage(),
         v2.ToDtype(torch.float32, scale=True)
     ])
-    # transform = v2.Compose([
-    #     v2.ToImage(), 
-    #     v2.RandomHorizontalFlip(0.5),
-    #     v2.RandomRotation(20),
-    #     v2.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
-    #     v2.ToDtype(torch.float32, scale=True)
-    # ])
 
     transform_v = v2.Compose([
-        v2.ToImage(), 
+        v2.ToImage(),
         v2.ToDtype(torch.float32, scale=True)
     ])
 
-    train_dataset = COCODetection('data/train', 'data/train.json', transforms=transform)
+    train_dataset = COCODetection('data/train',
+                                  'data/train.json',
+                                  transforms=transform)
     train_sampler = DistributedSampler(train_dataset, shuffle=True)
     train_loader = DataLoader(
         train_dataset,
@@ -242,7 +251,9 @@ def train(load_checkpoint = False, model_path="fasterrcnn_ddp_4.pth", mode = 0):
         collate_fn=collate_fn
     )
 
-    val_dataset = COCODetection('data/valid', 'data/valid.json', transforms=transform_v)
+    val_dataset = COCODetection('data/valid',
+                                'data/valid.json',
+                                transforms=transform_v)
     val_sampler = DistributedSampler(val_dataset, shuffle=False)
     val_loader = DataLoader(
         val_dataset,
@@ -264,7 +275,10 @@ def train(load_checkpoint = False, model_path="fasterrcnn_ddp_4.pth", mode = 0):
 
     # Optimizer and AMP scaler
     params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
+    optimizer = torch.optim.SGD(params,
+                                lr=0.005,
+                                momentum=0.9,
+                                weight_decay=0.0005)
     scaler = GradScaler()
 
     training_stats = []
@@ -274,12 +288,17 @@ def train(load_checkpoint = False, model_path="fasterrcnn_ddp_4.pth", mode = 0):
         model.train()
         train_sampler.set_epoch(epoch)
 
-        pbar = tqdm(train_loader, desc=f"[Epoch {epoch+1}/{num_epochs}]", unit="batch") if is_main_process() else train_loader
+        pbar = tqdm(train_loader,
+                    desc=f"[Epoch {epoch+1}/{num_epochs}]",
+                    unit="batch") if is_main_process() else train_loader
         epoch_loss = 0.0
 
         for images, targets in pbar:
             images = [img.to(device, non_blocking=True) for img in images]
-            targets = [{k: v.to(device, non_blocking=True) for k, v in t.items()} for t in targets]
+            targets = [
+                {k: v.to(device, non_blocking=True) for k, v in t.items()}
+                for t in targets
+            ]
 
             optimizer.zero_grad()
             with autocast():
@@ -298,15 +317,15 @@ def train(load_checkpoint = False, model_path="fasterrcnn_ddp_4.pth", mode = 0):
 
         if is_main_process():
             avg_loss = epoch_loss / len(train_loader)
-            print(f"[Epoch {epoch+1}] Avg Loss: {avg_loss:.4f}")
+            print(f"[Epoch {epoch+1}] Avg Loss: {avg_loss: .4f}")
 
             # Save checkpoint
-            torch.save(model.module.state_dict(), f'fasterrcnn_ddp_{epoch}.pth')
-            print("✅ Model saved as fasterrcnn_ddp_{epoch}.pth")
+            fn = f'fasterrcnn_ddp_{epoch}.pth'
+            torch.save(model.module.state_dict(), fn)
+            print("Model saved as fasterrcnn_ddp_{epoch}.pth")
 
         evaluate_coco(model.module, val_loader, val_coco, device, val_stats)
 
-    
     if is_main_process():
         with open("training_stats.pkl", "wb") as f:
             pickle.dump(training_stats, f)
@@ -317,26 +336,30 @@ def train(load_checkpoint = False, model_path="fasterrcnn_ddp_4.pth", mode = 0):
     cleanup_ddp()
 
 
-def load_and_evaluate(model_path="fasterrcnn_ddp_4.pth", mode = 0):
+def load_and_evaluate(model_path="fasterrcnn_ddp_4.pth", mode=0):
     setup_ddp()
 
     local_rank = int(os.environ["LOCAL_RANK"])
-    device = torch.device(f"cuda:{local_rank}")
+    device = torch.device(f"cuda: {local_rank}")
 
     num_classes = 11
     transform = v2.Compose([
-        v2.ToImage(), 
+        v2.ToImage(),
         v2.ToDtype(torch.float32, scale=True)
     ])
 
-    val_dataset = COCODetection('data/valid', 'data/valid.json', transforms=transform)
+    val_dataset = COCODetection('data/valid',
+                                'data/valid.json',
+                                transforms=transform)
     val_sampler = DistributedSampler(val_dataset, shuffle=False)
     val_loader = DataLoader(val_dataset, batch_size=1, sampler=val_sampler,
                             num_workers=4, collate_fn=collate_fn)
     val_coco = val_loader.dataset.coco
 
     model = get_model(num_classes, mode)
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))  # 🔥 load directly
+    model.load_state_dict(torch.load(model_path,
+                                     map_location=device,
+                                     weights_only=True))
     model.to(device)
 
     model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
@@ -351,7 +374,10 @@ def load_and_evaluate(model_path="fasterrcnn_ddp_4.pth", mode = 0):
 class TestImageFolderDataset(torch.utils.data.Dataset):
     def __init__(self, image_dir, transform=None):
         self.image_dir = image_dir
-        self.image_files = sorted([f for f in os.listdir(image_dir) if f.lower().endswith(('png', 'jpg', 'jpeg'))])
+        self.image_files = sorted([f for f in os.listdir(image_dir)
+                                   if f.lower().endswith(('png',
+                                                          'jpg',
+                                                          'jpeg'))])
         self.transform = transform if transform else transforms.ToTensor()
 
     def __getitem__(self, idx):
@@ -363,25 +389,26 @@ class TestImageFolderDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.image_files)
 
+
 @torch.no_grad()
-def test_on_folder(model_path="fasterrcnn_ddp_4.pth", mode = 0, device="cuda:1"):
+def test_on_folder(model_path="fasterrcnn_ddp_4.pth", mode=0, device="cuda"):
 
     image_dir = 'data/test'
-    output_file="submission.json"
-    
+    output_file = "submission.json"
 
     num_classes = 11
     transform = v2.Compose([
-        v2.ToImage(), 
+        v2.ToImage(),
         v2.ToDtype(torch.float32, scale=True)
     ])
     model = get_model(num_classes, mode)
-    model.load_state_dict(torch.load(model_path, map_location=device))  # 🔥 load directly
+    model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
 
     model.eval()
     dataset = TestImageFolderDataset(image_dir, transform)
-    loader = torch.utils.data.DataLoader(dataset, batch_size=1, num_workers=4, shuffle=False)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=1,
+                                         num_workers=4, shuffle=False)
 
     results = []
 
@@ -412,17 +439,18 @@ def test_on_folder(model_path="fasterrcnn_ddp_4.pth", mode = 0, device="cuda:1")
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', choices=['train', 'eval', 'test'], default='train')
+    parser.add_argument('--mode', choices=['train',
+                                           'eval',
+                                           'test'], default='train')
     parser.add_argument('--chkt-flag', default=False)
     parser.add_argument('--model-path', default='fasterrcnn_ddp.pth')
-    parser.add_argument('--model-type', choices=[0, 1], default=0, type= int)
+    parser.add_argument('--model-type', choices=[0, 1], default=0, type=int)
     parser.add_argument('--local-rank', default='0')
     args = parser.parse_args()
 
     if args.mode == 'train':
-        train(args.chkt_flag,args.model_path,args.model_type)
+        train(args.chkt_flag, args.model_path, args.model_type)
     elif args.mode == 'eval':
         load_and_evaluate(args.model_path, args.model_type)
     elif args.mode == 'test':
         test_on_folder(args.model_path, args.model_type)
-
