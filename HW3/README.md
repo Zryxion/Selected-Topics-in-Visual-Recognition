@@ -104,3 +104,7 @@ python submission.py
 ## Performance Snapshot
 
 ![](https://github.com/Zryxion/Selected-Topics-in-Visual-Recognition/blob/main/HW3/image/placement.png)
+
+## Acknowledgments
+
+This project is based on the [Mask R-CNN implementation by Matterport](https://github.com/matterport/Mask_RCNN/tree/master). 
