@@ -100,3 +100,7 @@ python submission.py
 
 > Both **check.p**y and **submission.py** uses the last weight.  
 > Path to weight other than the last should be initialized in the code.
+
+## Performance Snapshot
+
+![](https://github.com/Zryxion/Selected-Topics-in-Visual-Recognition/blob/main/HW3/image/placement.png)
