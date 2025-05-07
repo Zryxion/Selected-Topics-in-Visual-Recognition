@@ -89,7 +89,7 @@ Optional:
 ### Evaluation (on validation set)
 
 ```bash
-python check.py
+python eval.py
 ```
 
 ### Testing (on unseen image folder)
