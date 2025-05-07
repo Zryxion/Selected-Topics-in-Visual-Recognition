@@ -13,27 +13,40 @@ Key strategies include:
 
 ## Experiment Setup
 
-- **Architecture**: Faster R-CNN + ResNet50-FPN backbone (pretrained on COCO)
-- **Customizations**:
-  - Dropout(0.3) in the classification head
-  - Selective unfreezing of `layer4` and detection heads
-- **Training Setup**:
-  - Optimizer: SGD with momentum & weight decay
-  - Mixed precision (AMP) and DDP for faster training
-  - Evaluation via COCO mAP@[0.50:0.95] and validation accuracy
 
+- **Architecture**: Mask R-CNN + ResNet50-FPN or ResNet101-FPN backbone  
+- **Pretrained Weights**:
+  - ImageNet (for ResNet50)
+  - COCO (for ResNet101)
+- **Customizations**:
+  - Dropout(0.1) in residual or identity blocks (depending on model variant)
+- **Image Processing**:
+  - Resize and center crop to 512×512
+  - Enable mini-masks (56×56)
+  - Multi-scale anchors: [16, 32, 64, 128, 256]
+- **Data Augmentation (imgaug)**:
+  - Horizontal and vertical flip (50%)
+  - Rotations: 90°, 180°, 270°
+  - Brightness adjustments
+  - Gaussian blur
+- **Training Setup**:
+  - Stage 1: Train heads only (20 epochs)
+  - Stage 2: Fine-tune full model (40 epochs)
+  - Batch size: 2
+- **Evaluation**:
+  - COCO mAP@[0.50:0.95]
+  - Validation loss (total, mask, bbox, RPN)
+    
 ## Results and Findings
 
-| Model Variant                   | mAP@[0.50:0.95] | Accuracy |
-|-------------------------------|------------------|----------|
-| Faster R-CNN (Base)           | 0.454            | 92.6%    |
-| Faster R-CNN + Dropout        | 0.457            | 92.5%    |
-| Faster R-CNN + Dropout + Ft   | **0.465**        | **93.6%**|
+| Model Variant               | Pretrained | mAP@[0.50] | Val Loss |
+|----------------------------|------------|------------|----------|
+| Mask R-CNN (ResNet50)      | ImageNet   | 0.455      | 1.114    |
+| ResNet50 + Dropout         | ImageNet   | **0.524**  | 1.231    |
+| ResNet101 + Dropout*       | COCO       | 0.492      | **0.926**|
 
-- **Dropout alone** leads to a small but consistent **mAP gain**, suggesting improved **bounding box localization** through regularization.
-- However, **training loss curves** show **higher classification and box regression losses** for the dropout model, indicating slower convergence due to the stochastic nature of dropout.
-- Despite this, **validation performance** improves slightly, implying **better generalization**.
-- The best results are achieved when **dropout is combined with fine-tuning** of the deeper `layer4`, yielding the highest accuracy and mAP.
+> `*` Dropout applied to end of residual blocks.  
+> Dropout improves generalization, though may slightly raise training loss.
 
 ## 🔧 How to Install and Run
 
@@ -41,23 +54,15 @@ Key strategies include:
 
 ```bash
 git clone https://github.com/Zryxion/Selected-Topics-in-Visual-Recognition
-cd Selected-Topics-in-Visual-Recognition/HW1
+cd Selected-Topics-in-Visual-Recognition/HW3
 ```
 
 ### 2. Create a Conda Environment and Activate It
 
 ```bash
-conda create --name my_env python=3.10
-conda activate my_env
+conda env create -f environment.yml
+conda activate Mask_RCNN
 ```
-
-### 3. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
----
 
 ## 🚀 How to Use
 
@@ -66,29 +71,32 @@ All functionality is accessed through a single entry point (`main.py`) using com
 ### Training
 
 ```bash
-python main.py --mode train --model-type 0
+python main.py <command> --weights <path> [--dataset <path>] [--logs <path>] [--subset <name>] --type <1|2>
 ```
 
 Optional:
-- `--chkt-flag True`: Resume from checkpoint
-- `--model-path`: Path to load model (default: `fasterrcnn_ddp.pth`)
-- `--model-type`: Use `0` for baseline, `1` for Dropout version
+* `<command>`: `train` or `detect`
+* `--weights`: Path to weights `.h5` file or `'coco'`, `'last'`, `'imagenet'`
+* `--dataset`: Path to the dataset (required for training)
+* `--logs`: Directory to save logs and checkpoints (default: `logs/`)
+* `--subset`: Subset of the dataset to run detection on (required for detection)
+* `--type`:
+  * `1`: Use standard Mask R-CNN
+  * `2`: Use variant with dropout in the identity block
+
+
 
 ### Evaluation (on validation set)
 
 ```bash
-python main.py --mode eval --model-type 0
+python check.py
 ```
-
-Optional:
-- `--model-path`: Path to load model (default: `fasterrcnn_ddp.pth`)
-- `--model-type`: Use `0` for baseline, `1` for Dropout version
 
 ### Testing (on unseen image folder)
 
 ```bash
-python main.py --mode test --model-type 0
+python submission.py
 ```
-Optional:
-- `--model-path`: Path to load model (default: `fasterrcnn_ddp.pth`)
-- `--model-type`: Use `0` for baseline, `1` for Dropout version
+
+> Both **check.p**y and **submission.py** uses the last weight.  
+> Path to weight other than the last should be initialized in the code.
