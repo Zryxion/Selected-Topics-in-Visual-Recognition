@@ -22,7 +22,7 @@ from mrcnn.visualize import display_images
 from mrcnn import model2 as modellib
 from mrcnn.model import log
 
-import test_dl as nucleus
+import train as nucleus
 
 # Directory to save logs and trained model
 LOGS_DIR = os.path.join(ROOT_DIR, "logs")
