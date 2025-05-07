@@ -1,11 +1,7 @@
-if __name__ == '__main__':
-    import matplotlib
-    # Agg backend runs without a display
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
-import warnings
-warnings.filterwarnings("ignore")
+from mrcnn.config import Config
+from mrcnn import utils
+from mrcnn import model as modellib
+from mrcnn import model2 as modellib2
 
 import os
 import sys
@@ -16,16 +12,16 @@ import skimage.io
 from imgaug import augmenters as iaa
 from pycocotools import mask as mask_utils
 from tqdm import tqdm
+
+
+import warnings
+warnings.filterwarnings("ignore")
+
 # Root directory of the project
 ROOT_DIR = os.path.abspath("../../")
 
 # Import Mask RCNN
 sys.path.append(ROOT_DIR)  # To find local version of the library
-from mrcnn.config import Config
-from mrcnn import utils
-from mrcnn import model as modellib
-from mrcnn import model2 as modellib2
-from mrcnn import visualize
 
 # Path to trained weights file
 COCO_WEIGHTS_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
@@ -42,6 +38,7 @@ RESULTS_DIR = os.path.join(ROOT_DIR, "results/nucleus/")
 #  Configurations
 ############################################################
 
+
 class NucleusConfig(Config):
     """Configuration for training on the nucleus segmentation dataset."""
     # Give the configuration a recognizable name
@@ -55,7 +52,7 @@ class NucleusConfig(Config):
     NUM_CLASSES = 1 + 4  # Background + nucleus
 
     # Number of training and validation steps per epoch
-    STEPS_PER_EPOCH = (209  - 20) // IMAGES_PER_GPU
+    STEPS_PER_EPOCH = (209 - 20) // IMAGES_PER_GPU
     VALIDATION_STEPS = max(1, 20 // IMAGES_PER_GPU)
 
     # Don't exclude based on confidence. Since we have two classes
@@ -162,9 +159,9 @@ class NucleusDataset(utils.Dataset):
                     "nucleus",
                     image_id=image_id,
                     path=os.path.join(dataset_dir, image_id))
-                
+
             return
-        
+
         # Add images
         for image_id in image_ids:
             self.add_image(
@@ -182,7 +179,8 @@ class NucleusDataset(utils.Dataset):
         info = self.image_info[image_id]
         # Get mask directory from image path
         # print(info['id'])
-        mask_dir = os.path.join(os.path.dirname(os.path.dirname(info['path'])), info['id'])
+        mask_dir = os.path.join(
+            os.path.dirname(os.path.dirname(info['path'])), info['id'])
         # print(next(os.walk(mask_dir))[2])
         # Read mask files from .png image
         mask = []
@@ -193,11 +191,12 @@ class NucleusDataset(utils.Dataset):
                 # print(m.shape)
                 id = int(f[5])
                 for i in np.unique(m):
-                    if i == 0: continue
+                    if i == 0:
+                        continue
                     m_i = m == i
                     mask.append(m_i.astype(bool))
                     mask_class.append(id)
-        mask = np.stack(mask, axis= -1)
+        mask = np.stack(mask, axis=-1)
         # print(mask.shape)
         mask_class = np.stack(mask_class)
         # Return mask, and array of class IDs of each instance. Since we have
@@ -230,7 +229,7 @@ def train(model, dataset_dir, subset):
     dataset_val = NucleusDataset()
     dataset_val.load_nucleus(dataset_dir, "val")
     dataset_val.prepare()
-    
+
     # Image augmentation
     # http://imgaug.readthedocs.io/en/latest/source/augmenters.html
     augmentation = iaa.SomeOf((0, 2), [
@@ -310,7 +309,7 @@ def detect(model, dataset_dir, map_dir, subset):
         # Load image and run detection
         image = dataset.load_image(image_id)
         # Detect objects
-        
+
         r = model.detect([image], verbose=0)[0]
         print(r)
         r["masks"] = np.transpose(r["masks"], (2, 0, 1))
@@ -327,7 +326,7 @@ def detect(model, dataset_dir, map_dir, subset):
                     'segmentation': encode_mask(r["masks"][i])
                 }
             )
-            
+
     file_path = os.path.join(submit_dir, "submit.json")
     with open(file_path, "w") as f:
         json.dump(submission, f)
@@ -388,17 +387,17 @@ if __name__ == '__main__':
     if args.command == "train":
         if args.type == "1":
             model = modellib.MaskRCNN(mode="training", config=config,
-                                  model_dir=args.logs)
+                                      model_dir=args.logs)
         else:
             model = modellib2.MaskRCNN(mode="training", config=config,
-                                  model_dir=args.logs)
+                                       model_dir=args.logs)
     else:
         if args.type == "1":
             model = modellib.MaskRCNN(mode="inference", config=config,
-                                  model_dir=args.logs)
+                                      model_dir=args.logs)
         else:
             model = modellib2.MaskRCNN(mode="inference", config=config,
-                                  model_dir=args.logs)
+                                       model_dir=args.logs)
 
     # Select weights file to load
     if args.weights.lower() == "coco":
