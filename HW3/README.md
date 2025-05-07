@@ -31,7 +31,7 @@ Key strategies include:
   - Gaussian blur
 - **Training Setup**:
   - Stage 1: Train heads only (20 epochs)
-  - Stage 2: Fine-tune full model (40 epochs)
+  - Stage 2: Fine-tune full model (20 epochs)
   - Batch size: 2
 - **Evaluation**:
   - COCO mAP@[0.50:0.95]
