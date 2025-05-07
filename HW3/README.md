@@ -98,7 +98,7 @@ python eval.py
 python submission.py
 ```
 
-> Both **check.p**y and **submission.py** uses the last weight.  
+> Both **eval.py** and **submission.py** uses the last weight.  
 > Path to weight other than the last should be initialized in the code.
 
 ## Performance Snapshot
