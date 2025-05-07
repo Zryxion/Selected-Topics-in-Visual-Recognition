@@ -4,9 +4,12 @@ Name: 林家輝
 
 ## Introduction
 
-The goal of this project is to develop a robust **object detection system** based on the **Faster R-CNN** architecture with a **ResNet50-FPN** backbone, capable of detecting and classifying **10 numeric digits**. The approach leverages **transfer learning** from COCO-pretrained weights, with selective fine-tuning and various regularization strategies to optimize model performance on a custom dataset.
-
-To improve generalization and prevent overfitting, we introduce **dropout regularization** in the classification head and selectively unfreeze deeper layers (e.g., `layer4`) in the backbone. The model is trained and evaluated using **COCO-style mAP metrics** and **validation accuracy**, with training optimized via **mixed precision (AMP)** and **Distributed Data Parallel (DDP)**.
+The goal of this project is to develop a robust nucleus instance segmentation system using the **Mask R-CNN** architecture with a **ResNet-FPN** backbone. The model is trained to segment and classify nuclei across **four distinct types**, leveraging **transfer learning** with **COCO-pretrained weights** and a staged fine-tuning approach.
+Key strategies include: 
+* **Dropout regularization** in residual/identity blocks of ResNet to reduce overfitting.
+* **Selective layer freezing/unfreezing** to control learning stability.
+* **Data augmentation** via `imgaug` to improve generalization.
+* **COCO-style evaluation metrics** to benchmark performance.
 
 ## Experiment Setup
 
