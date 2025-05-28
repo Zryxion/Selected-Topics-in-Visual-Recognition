@@ -31,7 +31,7 @@ Key strategies include:
   - Gaussian blur
 - **Training Setup**:
   - Stage 1: Train heads only (20 epochs)
-  - Stage 2: Fine-tune full model (40 epochs)
+  - Stage 2: Fine-tune full model (20 epochs)
   - Batch size: 2
 - **Evaluation**:
   - COCO mAP@[0.50:0.95]
@@ -98,9 +98,13 @@ python eval.py
 python submission.py
 ```
 
-> Both **check.p**y and **submission.py** uses the last weight.  
+> Both **eval.py** and **submission.py** uses the last weight.  
 > Path to weight other than the last should be initialized in the code.
 
 ## Performance Snapshot
 
 ![](https://github.com/Zryxion/Selected-Topics-in-Visual-Recognition/blob/main/HW3/image/placement.png)
+
+## Acknowledgments
+
+This project is based on the [Mask R-CNN implementation by Matterport](https://github.com/matterport/Mask_RCNN/tree/master). 
