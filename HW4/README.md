@@ -88,7 +88,7 @@ python demo.py \
   --test_path ./path_to_data/ \
   --ckpt_name ./path_to_checkpoint/epoch=XXX-step=YYYYY.ckpt
 ```
-
+> For convenience, dehazing has been repurposed for desnowing
 ## Performance Snapshot
 
 ![](https://github.com/Zryxion/Selected-Topics-in-Visual-Recognition/blob/main/HW4/image/placement.png)
