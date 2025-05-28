@@ -1,109 +1,99 @@
-# PromptIR: Prompting for All-in-One Blind Image Restoration (NeurIPS'23)
+# NYCU STinVRuDL 2025 Spring HW4
+Student ID: 313561001   
+Name: 林家輝
 
-[Vaishnav Potlapalli](https://www.vaishnavrao.com/), [Syed Waqas Zamir](https://scholar.google.ae/citations?hl=en&user=POoai-QAAAAJ), [Salman Khan](https://salman-h-khan.github.io/) and [Fahad Shahbaz Khan](https://scholar.google.es/citations?user=zvaeYnUAAAAJ&hl=en)
+## Introduction
+The goal of this project is to develop a high-performance **blind image restoration** system using the **PromptIR** framework. PromptIR is a **prompt-based, Transformer-driven** model designed for **all-in-one image restoration tasks** such as denoising, deblurring, deraining, and more. It leverages **hierarchical transformer encoders and decoders** along with **task-specific prompt generation** modules to conditionally guide restoration. 
 
-[![paper](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/abs/2306.13090)
+Key strategies in this project include: 
+* **Architecture customization** by experimenting with different Transformer block types (e.g., vanilla vs. Swin) and depth configurations.
+* **Prompt injection** to enable adaptive, task-aware processing across different restoration objectives.
+* **Mixed-precision distributed training** (using PyTorch Lightning DDP with AMP) for efficiency and scalability.
+* **Quantitative evaluation** using **PSNR** and **SSIM** metrics to benchmark restoration quality across variants.
 
+## 🧪 Experiment Setup 
+- Architecture: PromptIR (4-stage hierarchical Transformer encoder-decoder)
+- Backbone Variants:
+  - PromptIR: Default architecture with vanilla Transformer blocks
+  - PromptIR-T: More Transformer depth (6, 8, 8, 10) + refinement depth 8
+  - PromptIR-S_LR: Swin Transformer used in all blocks except latent & refinement
+  - PromptIR-S_enc: Swin Transformer used only in encoder blocks
+  - PromptIR-S_enc-T: Combines Swin encoder + deep PromptIR-T structure -
+- Swin Transformer Settings:
+  - All Swin blocks use window_size = 8
+- Data Augmentation:
+  - Random crop
+  - Horizontal flip
+  - Vertical flip
+- Training Setup:
+  - Distributed training (DDP) with mixed precision (AMP)
+  - Batch size: 8 per GPU - Optimizer: AdamW
+  - Learning rate scheduler: Cosine Annealing
+- Evaluation Metrics:
+  - PSNR (Peak Signal-to-Noise Ratio)
+  - SSIM (Structural Similarity Index)
 
-<hr />
+## 📊 Results and Findings 
 
-> **Abstract:** *Image restoration involves recovering a high-quality clean image from its degraded
-version. Deep learning-based methods have significantly improved image restora-
-tion performance, however, they have limited generalization ability to different
-degradation types and levels. This restricts their real-world application since it
-requires training individual models for each specific degradation and knowing the
-input degradation type to apply the relevant model. We present a prompt-based
-learning approach, PromptIR, for All-In-One image restoration that can effectively
-restore images from various types and levels of degradation. In particular, our
-method uses prompts to encode degradation-specific information, which is then
-used to dynamically guide the restoration network. This allows our method to
-generalize to different degradation types and levels, while still achieving state-of-
-the-art results on image denoising, deraining, and dehazing. Overall, PromptIR
-offers a generic and efficient plugin module with few lightweight prompts that can
-be used to restore images of various types and levels of degradation with no prior
-information of corruptions.* 
-<hr />
+| Model Variant | PSNR | SSIM | 
+|---------------------|-------|--------| 
+| PromptIR | 29.72 | 0.9064 | 
+| **PromptIR-T** | **30.26** | **0.9145** | 
+| PromptIR-S_LR | 28.82 | 0.8925 | 
+| PromptIR-S_enc | 29.95 | 0.9098 | 
+| PromptIR-S_enc-T | 29.49 | 0.9028 | 
 
-## Network Architecture
+## 🛠️ How to Install and Run
 
-<img src = "mainfig.png"> 
+### 1. Clone the Repository
 
-## Installation and Data Preparation
-
-See [INSTALL.md](INSTALL.md) for the installation of dependencies and dataset preperation required to run this codebase.
-
-## Training
-
-After preparing the training data in ```data/``` directory, use 
-```
-python train.py
-```
-to start the training of the model. Use the ```de_type``` argument to choose the combination of degradation types to train on. By default it is set to all the 3 degradation types (noise, rain, and haze).
-
-Example Usage: If we only want to train on deraining and dehazing:
-```
-python train.py --de_type derain dehaze
-```
-
-## Testing
-
-After preparing the testing data in ```test/``` directory, place the mode checkpoint file in the ```ckpt``` directory. The pretrained model can be downloaded [here](https://drive.google.com/file/d/1j-b5Od70pGF7oaCqKAfUzmf-N-xEAjYl/view?usp=sharingg), alternatively, it is also available under the releases tab. To perform the evalaution use
-```
-python test.py --mode {n}
-```
-```n``` is a number that can be used to set the tasks to be evaluated on, 0 for denoising, 1 for deraining, 2 for dehaazing and 3 for all-in-one setting.
-
-Example Usage: To test on all the degradation types at once, run:
-
-```
-python test.py --mode 3
+```bash
+git clone https://github.com/Zryxion/Selected-Topics-in-Visual-Recognition
+cd Selected-Topics-in-Visual-Recognition/HW4
 ```
 
-## Demo
-To obtain visual results from the model ```demo.py``` can be used. After placing the saved model file in ```ckpt``` directory, run:
+### 2. Create and Activate the Conda Environment
+
+```bash
+conda env create -f environment.yml
+conda activate promptir
 ```
-python demo.py --test_path {path_to_degraded_images} --output_path {save_images_here}
+
+### 3. Train the Model (Example with Deraining and Dehazing)
+
+```bash
+python train.py \
+  --epochs 150 \
+  --de_type derain dehaze \
+  --dehaze_dir ./path_to_data/ \
+  --derain_dir ./path_to_data/ \
+  --num_gpus 2 \
+  --num_workers 12 \
+  --batch_size 3
 ```
-Example usage to run inference on a directory of images:
+
+### 4. Run Evaluation on a Specific Task (e.g., Derain)
+
+```bash
+python test.py \
+  --derain_path ./path_to_data/ \
+  --ckpt_name ./path_to_checkpoint/epoch=XXX-step=YYYYY.ckpt \
+  --cuda 0
 ```
-python demo.py --test_path './test/demo/' --output_path './output/demo/'
+
+### 5. Run Demo on Test Images
+
+```bash
+python demo.py \
+  --test_path ./path_to_data/ \
+  --ckpt_name ./path_to_checkpoint/epoch=XXX-step=YYYYY.ckpt
 ```
-Example usage to run inference on an image directly:
-```
-python demo.py --test_path './test/demo/image.png' --output_path './output/demo/'
-```
-To use tiling option while running ```demo.py``` set ```--tile``` option to ```True```. The Tile size and Tile overlap parameters can be adjusted using ```--tile_size``` and ```--tile_overlap``` options respectively.
 
+## Performance Snapshot
 
+![](https://github.com/Zryxion/Selected-Topics-in-Visual-Recognition/blob/main/HW4/image/placement.png)
 
+## Acknowledgments
 
-## Results
-Performance results of the PromptIR framework trained under the all-in-one setting
-
-<summary><strong>Table</strong> </summary>
-
-<img src = "prompt-ir-results.png"> 
-
-<summary><strong>Visual Results</strong></summary>
-
-The visual results of the PromptIR model evaluated under the all-in-one setting can be downloaded [here](https://drive.google.com/drive/folders/1Sm-mCL-i4OKZN7lKuCUrlMP1msYx3F6t?usp=sharing)
-
-
-
-## Citation
-If you use our work, please consider citing:
-
-    @inproceedings{potlapalli2023promptir,
-      title={PromptIR: Prompting for All-in-One Image Restoration},
-      author={Potlapalli, Vaishnav and Zamir, Syed Waqas and Khan, Salman and Khan, Fahad},
-      booktitle={Thirty-seventh Conference on Neural Information Processing Systems},
-      year={2023}
-    }
-
-
-## Contact
-Should you have any questions, please contact pvaishnav2718@gmail.com
-
-
-**Acknowledgment:** This code is based on the [AirNet](https://github.com/XLearning-SCU/2022-CVPR-AirNet) and [Restormer](https://github.com/swz30/Restormer) repositories. 
+This project is based on the [PromptIR: Prompting for All-in-One Blind Image Restoration (NeurIPS'23)](https://github.com/va1shn9v/PromptIR). 
 
